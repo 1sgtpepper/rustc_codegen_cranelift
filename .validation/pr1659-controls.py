@@ -6,7 +6,7 @@ import signal
 import subprocess
 import sys
 
-CANDIDATE = "5b60e2bc72f0c9136851a1f17205b3937c8a3ed4"
+CANDIDATE = "ee5e234933aed51cbb17fb76579c29e0a50f9e4f"
 BASE = "1ca121740cf4fcda586e1ce665962f8b936e790b"
 SOURCE = Path("src/abi/pass_mode.rs")
 RESULTS = Path("control-results")
