@@ -1,0 +1,37 @@
+name: PR 1659 behavioral controls
+on: push
+permissions: {}
+env:
+  CG_CLIF_EXPENSIVE_CHECKS: 1
+  RUSTFLAGS: -Dwarnings
+jobs:
+  abi-regression:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - run: python3 .validation/pr1659-controls.py abi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: macos-abi-controls
+          path: control-results
+  big-endian:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TARGET_TRIPLE: s390x-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v6
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-s390x-linux-gnu qemu-user
+          rustup target add s390x-unknown-linux-gnu
+      - run: python3 .validation/pr1659-controls.py endian
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: s390x-endian-controls
+          path: control-results
