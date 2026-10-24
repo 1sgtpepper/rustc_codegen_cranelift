@@ -560,10 +560,13 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
 
             simd_for_each_lane(fx, a, ret, &|fx, lane_ty, _ret_lane_ty, lane| {
                 let lane_ty = match lane_ty.kind() {
+                    // f16 is converted to f32 by maybe_with_f16_to_f32.
+                    ty::Float(FloatTy::F16) => types::F32,
                     ty::Float(FloatTy::F32) => types::F32,
                     ty::Float(FloatTy::F64) => types::F64,
                     _ => unreachable!("{:?}", lane_ty),
                 };
+
                 let name = match (intrinsic, lane_ty) {
                     (sym::simd_fsin, types::F32) => "sinf",
                     (sym::simd_fsin, types::F64) => "sin",
@@ -585,12 +588,15 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                     (sym::simd_round_ties_even, types::F64) => "rint",
                     _ => unreachable!("{:?}", intrinsic),
                 };
-                fx.lib_call(
-                    name,
-                    vec![AbiParam::new(lane_ty)],
-                    vec![AbiParam::new(lane_ty)],
-                    &[lane],
-                )[0]
+
+                codegen_f16_f128::maybe_with_f16_to_f32(fx, lane, |fx, lane| {
+                    fx.lib_call(
+                        name,
+                        vec![AbiParam::new(lane_ty)],
+                        vec![AbiParam::new(lane_ty)],
+                        &[lane],
+                    )[0]
+                })
             });
         }
 
@@ -815,7 +821,7 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                 let a_lane = a.value_lane(fx, lane).load_scalar(fx);
                 let b_lane = b.value_lane(fx, lane).load_scalar(fx);
 
-                let m_lane = fx.bcx.ins().icmp_imm(IntCC::Equal, m_lane, 0);
+                let m_lane = fx.bcx.ins().icmp_imm_u(IntCC::Equal, m_lane, 0);
                 let res_lane =
                     CValue::by_val(fx.bcx.ins().select(m_lane, b_lane, a_lane), lane_layout);
 
@@ -874,12 +880,12 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                     Endian::Big => lane_count - 1 - lane,
                     Endian::Little => lane,
                 };
-                let m_lane = fx.bcx.ins().ushr_imm(m, mask_lane.cast_signed());
-                let m_lane = fx.bcx.ins().band_imm(m_lane, 1);
+                let m_lane = fx.bcx.ins().ushr_imm_u(m, mask_lane.cast_signed());
+                let m_lane = fx.bcx.ins().band_imm_u(m_lane, 1);
                 let a_lane = a.value_lane(fx, lane).load_scalar(fx);
                 let b_lane = b.value_lane(fx, lane).load_scalar(fx);
 
-                let m_lane = fx.bcx.ins().icmp_imm(IntCC::Equal, m_lane, 0);
+                let m_lane = fx.bcx.ins().icmp_imm_u(IntCC::Equal, m_lane, 0);
                 let res_lane =
                     CValue::by_val(fx.bcx.ins().select(m_lane, b_lane, a_lane), lane_layout);
 
@@ -933,11 +939,12 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                 let a_lane = a.value_lane(fx, lane).load_scalar(fx);
 
                 // extract sign bit of an int
-                let a_lane_sign = fx.bcx.ins().ushr_imm(a_lane, i64::from(lane_clif_ty.bits() - 1));
+                let a_lane_sign =
+                    fx.bcx.ins().ushr_imm_u(a_lane, i64::from(lane_clif_ty.bits() - 1));
 
                 // shift sign bit into result
                 let a_lane_sign = clif_intcast(fx, a_lane_sign, res_type, false);
-                res = fx.bcx.ins().ishl_imm(res, 1);
+                res = fx.bcx.ins().ishl_imm_u(res, 1);
                 res = fx.bcx.ins().bor(res, a_lane_sign);
             }
 
@@ -1002,7 +1009,7 @@ pub(super) fn codegen_simd_intrinsic_call<'tcx>(
                 let offset_lane = offset.value_lane(fx, lane_idx).load_scalar(fx);
 
                 let ptr_diff = if pointee_size != 1 {
-                    fx.bcx.ins().imul_imm(offset_lane, pointee_size as i64)
+                    fx.bcx.ins().imul_imm_u(offset_lane, pointee_size as i64)
                 } else {
                     offset_lane
                 };

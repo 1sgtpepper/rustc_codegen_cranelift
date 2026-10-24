@@ -148,51 +148,30 @@ pub(crate) fn codegen_f128_binop(
 
 pub(crate) fn neg_f16(fx: &mut FunctionCx<'_, '_, '_>, value: Value) -> Value {
     let bits = fx.bcx.ins().bitcast(types::I16, MemFlagsData::new(), value);
-    let bits = fx.bcx.ins().bxor_imm(bits, 0x8000);
+    let bits = fx.bcx.ins().bxor_imm_u(bits, 0x8000);
     fx.bcx.ins().bitcast(types::F16, MemFlagsData::new(), bits)
 }
 
 pub(crate) fn neg_f128(fx: &mut FunctionCx<'_, '_, '_>, value: Value) -> Value {
     let bits = fx.bcx.ins().bitcast(types::I128, MemFlagsData::new(), value);
     let (low, high) = fx.bcx.ins().isplit(bits);
-    let high = fx.bcx.ins().bxor_imm(high, 0x8000_0000_0000_0000_u64 as i64);
+    let high = fx.bcx.ins().bxor_imm_u(high, 0x8000_0000_0000_0000_u64 as i64);
     let bits = fx.bcx.ins().iconcat(low, high);
     fx.bcx.ins().bitcast(types::F128, MemFlagsData::new(), bits)
 }
 
 pub(crate) fn abs_f16(fx: &mut FunctionCx<'_, '_, '_>, value: Value) -> Value {
     let bits = fx.bcx.ins().bitcast(types::I16, MemFlagsData::new(), value);
-    let bits = fx.bcx.ins().band_imm(bits, 0x7fff);
+    let bits = fx.bcx.ins().band_imm_u(bits, 0x7fff);
     fx.bcx.ins().bitcast(types::F16, MemFlagsData::new(), bits)
 }
 
 pub(crate) fn abs_f128(fx: &mut FunctionCx<'_, '_, '_>, value: Value) -> Value {
     let bits = fx.bcx.ins().bitcast(types::I128, MemFlagsData::new(), value);
     let (low, high) = fx.bcx.ins().isplit(bits);
-    let high = fx.bcx.ins().band_imm(high, 0x7fff_ffff_ffff_ffff_u64 as i64);
+    let high = fx.bcx.ins().band_imm_u(high, 0x7fff_ffff_ffff_ffff_u64 as i64);
     let bits = fx.bcx.ins().iconcat(low, high);
     fx.bcx.ins().bitcast(types::F128, MemFlagsData::new(), bits)
-}
-
-pub(crate) fn copysign_f16(fx: &mut FunctionCx<'_, '_, '_>, lhs: Value, rhs: Value) -> Value {
-    let lhs = fx.bcx.ins().bitcast(types::I16, MemFlagsData::new(), lhs);
-    let rhs = fx.bcx.ins().bitcast(types::I16, MemFlagsData::new(), rhs);
-    let res = fx.bcx.ins().band_imm(lhs, 0x7fff);
-    let sign = fx.bcx.ins().band_imm(rhs, 0x8000);
-    let res = fx.bcx.ins().bor(res, sign);
-    fx.bcx.ins().bitcast(types::F16, MemFlagsData::new(), res)
-}
-
-pub(crate) fn copysign_f128(fx: &mut FunctionCx<'_, '_, '_>, lhs: Value, rhs: Value) -> Value {
-    let lhs = fx.bcx.ins().bitcast(types::I128, MemFlagsData::new(), lhs);
-    let rhs = fx.bcx.ins().bitcast(types::I128, MemFlagsData::new(), rhs);
-    let (low, lhs_high) = fx.bcx.ins().isplit(lhs);
-    let (_, rhs_high) = fx.bcx.ins().isplit(rhs);
-    let high = fx.bcx.ins().band_imm(lhs_high, 0x7fff_ffff_ffff_ffff_u64 as i64);
-    let sign = fx.bcx.ins().band_imm(rhs_high, 0x8000_0000_0000_0000_u64 as i64);
-    let high = fx.bcx.ins().bor(high, sign);
-    let res = fx.bcx.ins().iconcat(low, high);
-    fx.bcx.ins().bitcast(types::F128, MemFlagsData::new(), res)
 }
 
 pub(crate) fn codegen_cast(
@@ -259,7 +238,7 @@ pub(crate) fn codegen_cast(
             },
         );
         let ret =
-            fx.lib_call(&name, vec![AbiParam::new(from_ty)], vec![AbiParam::new(to_ty)], &[from])
+            fx.lib_call(&name, vec![AbiParam::new(from_ty)], vec![AbiParam::new(ret_ty)], &[from])
                 [0];
         let val = if ret_ty == to_ty {
             ret
@@ -275,20 +254,16 @@ pub(crate) fn codegen_cast(
             let max_val = fx.bcx.ins().iconst(types::I32, max);
 
             let val = if to_signed {
-                let has_underflow = fx.bcx.ins().icmp_imm(IntCC::SignedLessThan, ret, min);
-                let has_overflow = fx.bcx.ins().icmp_imm(IntCC::SignedGreaterThan, ret, max);
+                let has_underflow = fx.bcx.ins().icmp_imm_s(IntCC::SignedLessThan, ret, min);
+                let has_overflow = fx.bcx.ins().icmp_imm_s(IntCC::SignedGreaterThan, ret, max);
                 let bottom_capped = fx.bcx.ins().select(has_underflow, min_val, ret);
                 fx.bcx.ins().select(has_overflow, max_val, bottom_capped)
             } else {
-                let has_overflow = fx.bcx.ins().icmp_imm(IntCC::UnsignedGreaterThan, ret, max);
+                let has_overflow = fx.bcx.ins().icmp_imm_u(IntCC::UnsignedGreaterThan, ret, max);
                 fx.bcx.ins().select(has_overflow, max_val, ret)
             };
             fx.bcx.ins().ireduce(to_ty, val)
         };
-
-        if let Some(false) = fx.tcx.sess.opts.unstable_opts.saturating_float_casts {
-            return val;
-        }
 
         let is_not_nan = fcmp(fx, FloatCC::Equal, from, from);
         let zero = type_zero_value(&mut fx.bcx, to_ty);

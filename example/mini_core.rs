@@ -6,6 +6,7 @@
     extern_types,
     decl_macro,
     rustc_attrs,
+    rustc_private,
     transparent_unions,
     pattern_types,
     auto_traits,
@@ -496,7 +497,7 @@ pub trait FnMut<Args: Tuple>: FnOnce<Args> {
 pub fn panic(_msg: &'static str) -> ! {
     unsafe {
         libc::puts("Panicking\n\0" as *const str as *const i8);
-        intrinsics::abort();
+        intrinsics::abort_immediate();
     }
 }
 
@@ -538,7 +539,7 @@ fn panic_bounds_check(index: usize, len: usize) -> ! {
             len,
             index,
         );
-        intrinsics::abort();
+        intrinsics::abort_immediate();
     }
 }
 
@@ -547,7 +548,7 @@ fn panic_bounds_check(index: usize, len: usize) -> ! {
 fn panic_cannot_unwind() -> ! {
     unsafe {
         libc::puts("panic in a function that cannot unwind\n\0" as *const str as *const i8);
-        intrinsics::abort();
+        intrinsics::abort_immediate();
     }
 }
 
@@ -687,7 +688,7 @@ pub union MaybeUninit<T> {
 
 pub mod intrinsics {
     #[rustc_intrinsic]
-    pub fn abort() -> !;
+    pub fn abort_immediate() -> !;
     #[rustc_intrinsic]
     pub const fn size_of<T>() -> usize;
     #[rustc_intrinsic]

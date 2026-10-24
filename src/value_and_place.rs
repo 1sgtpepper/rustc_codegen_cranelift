@@ -45,7 +45,7 @@ fn codegen_field<'tcx>(
             // Bump the unaligned offset up to the appropriate alignment
             let one = fx.bcx.ins().iconst(fx.pointer_type, 1);
             let align_sub_1 = fx.bcx.ins().isub(unsized_align, one);
-            let and_lhs = fx.bcx.ins().iadd_imm(align_sub_1, unaligned_offset as i64);
+            let and_lhs = fx.bcx.ins().iadd_imm_u(align_sub_1, unaligned_offset as i64);
             let zero = fx.bcx.ins().iconst(fx.pointer_type, 0);
             let and_rhs = fx.bcx.ins().isub(zero, unsized_align);
             let offset = fx.bcx.ins().band(and_lhs, and_rhs);
@@ -132,9 +132,7 @@ impl<'tcx> CValue<'tcx> {
                 let clif_ty = match layout.backend_repr {
                     BackendRepr::Scalar(scalar) => scalar_to_clif_type(fx.tcx, scalar),
                     BackendRepr::SimdVector { element, count } => {
-                        scalar_to_clif_type(fx.tcx, element)
-                            .by(u32::try_from(count).unwrap())
-                            .unwrap()
+                        scalar_to_clif_type(fx.tcx, element).by(count.as_u32()).unwrap()
                     }
                     _ => unreachable!("{:?}", layout.ty),
                 };
@@ -268,7 +266,8 @@ impl<'tcx> CValue<'tcx> {
             CValueInner::ByVal(_) | CValueInner::ByValPair(_, _) => unreachable!(),
             CValueInner::ByRef(ptr, None) => {
                 let lane_idx = clif_intcast(fx, lane_idx, fx.pointer_type, false);
-                let field_offset = fx.bcx.ins().imul_imm(lane_idx, lane_layout.size.bytes() as i64);
+                let field_offset =
+                    fx.bcx.ins().imul_imm_u(lane_idx, lane_layout.size.bytes() as i64);
                 let field_ptr = ptr.offset_value(fx, field_offset);
                 CValue::by_ref(field_ptr, lane_layout)
             }
@@ -694,7 +693,7 @@ impl<'tcx> CPlace<'tcx> {
         };
 
         let (field_ptr, field_layout) = codegen_field(fx, base, extra, layout, field);
-        if fx.tcx.type_has_metadata(field_layout.ty, ty::TypingEnv::fully_monomorphized()) {
+        if fx.tcx.type_has_metadata(field_layout.ty, fx.typing_env()) {
             CPlace::for_ptr_with_extra(field_ptr, extra.unwrap(), field_layout)
         } else {
             CPlace::for_ptr(field_ptr, field_layout)
@@ -775,7 +774,7 @@ impl<'tcx> CPlace<'tcx> {
                 let field_offset = fx
                     .bcx
                     .ins()
-                    .imul_imm(lane_idx, i64::try_from(lane_layout.size.bytes()).unwrap());
+                    .imul_imm_u(lane_idx, i64::try_from(lane_layout.size.bytes()).unwrap());
                 let field_ptr = ptr.offset_value(fx, field_offset);
                 CPlace::for_ptr(field_ptr, lane_layout).write_cvalue(fx, value);
             }
@@ -802,14 +801,14 @@ impl<'tcx> CPlace<'tcx> {
             _ => bug!("place_index({:?})", self.layout().ty),
         };
 
-        let offset = fx.bcx.ins().imul_imm(index, elem_layout.size.bytes() as i64);
+        let offset = fx.bcx.ins().imul_imm_u(index, elem_layout.size.bytes() as i64);
 
         CPlace::for_ptr(ptr.offset_value(fx, offset), elem_layout)
     }
 
     pub(crate) fn place_deref(self, fx: &mut FunctionCx<'_, '_, 'tcx>) -> CPlace<'tcx> {
         let inner_layout = fx.layout_of(self.layout().ty.builtin_deref(true).unwrap());
-        if fx.tcx.type_has_metadata(inner_layout.ty, ty::TypingEnv::fully_monomorphized()) {
+        if fx.tcx.type_has_metadata(inner_layout.ty, fx.typing_env()) {
             let (addr, extra) = self.to_cvalue(fx).load_scalar_pair(fx);
             CPlace::for_ptr_with_extra(Pointer::new(addr), extra, inner_layout)
         } else {
@@ -822,7 +821,7 @@ impl<'tcx> CPlace<'tcx> {
         fx: &mut FunctionCx<'_, '_, 'tcx>,
         layout: TyAndLayout<'tcx>,
     ) -> CValue<'tcx> {
-        if fx.tcx.type_has_metadata(self.layout().ty, ty::TypingEnv::fully_monomorphized()) {
+        if fx.tcx.type_has_metadata(self.layout().ty, fx.typing_env()) {
             let (ptr, extra) = self.to_ptr_unsized();
             CValue::by_val_pair(ptr.get_addr(fx), extra, layout)
         } else {
